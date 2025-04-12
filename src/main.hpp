@@ -22,6 +22,7 @@
 #include <algorithm>
 #include <memory>
 #include <map>
+#include <cassert>
 
 #define SDL_MAIN_HANDLED
 #include <SDL2/SDL.h>
@@ -31,10 +32,24 @@
 // forward classes declaration
 struct Point2D;
 class Character;
+class Player;
+class CollisionBoard;
+
+enum class CharacterName
+{
+    NONE,
+    PAWN,
+    ROOK,
+    KNIGHT,
+    BISHOP,
+    KING,
+    QUEEN
+};
 
 extern Character* currentChr;
 extern std::vector<std::unique_ptr<Character>> characters;
 extern std::map<std::string, SDL_Texture*> textures;
+extern Player player1, player2;
 
 
 std::vector<std::unique_ptr<Character>>::iterator getPieceAt(Point2D pos);
@@ -47,7 +62,7 @@ void processEvent(SDL_Event& evt);
 
 void mainLoop();
 
-void initCharacters();
+void initPlayers();
 
 void loadTexture(const std::string& name, const std::string& path);
 
@@ -70,15 +85,17 @@ protected:
     Point2D oldPos{ 0, 0 };
     bool isTop = false;
     bool isSelected = false;
-    std::string name;
+    CharacterName name;
 
     bool isFirstMove = true;
     Point2D startPos;
 
+    using path_t = std::vector<Point2D>;
+
 public:
     bool isWhite = false;
 
-    Character(Point2D p, const std::string& _name, bool _isWhite, bool _isTop);
+    Character(Point2D p, CharacterName _name, bool _isWhite, bool _isTop);
 
     void Draw(SDL_Renderer* renderer);
 
@@ -87,6 +104,10 @@ public:
     decltype(pos)& GetPos();
 
     bool IsSame(const Character& other);
+
+    static path_t GetRookPath(Character& character);
+
+    static path_t GetBishopPath(Character& character);
 
 
     /**
@@ -104,27 +125,16 @@ public:
      * @param dest is the destination to move the piece to
      * 
      */
-    virtual void MoveTo(Point2D dest)
+    virtual bool MoveTo(Point2D dest);
+
+    inline CharacterName GetName() const
     {
-        auto n = GetPath();
-        auto isMoveable = std::find_if(n.begin(), n.end(), [&dest](Point2D p) {
-            return (dest.x == p.x && dest.y == p.y);
-            });
+        return name;
+    }
 
-        if (isMoveable != n.end())
-        {
-            auto piece = getPieceAt(dest);
-
-            // If the piece is not the same as that in the destination, it should be captured
-            // By implementation of GetPath(), any piece that is found on the path must be capturable
-            if (piece != characters.end())
-            {
-                characters.erase(piece);
-                std::cout << "Implement points based on character here: " << std::endl;
-            }
-            pos.x = dest.x;
-            pos.y = dest.y;
-        }
+    inline int GetColor() const
+    {
+        return isWhite ? 1 : 0;
     }
 
 };
@@ -134,7 +144,7 @@ class Pawn: public Character
 {
 
 public:
-    Pawn(Point2D p, bool isWhite, bool isTop) : Character(p, "pawn", isWhite, isTop) {};
+    Pawn(Point2D p, bool isWhite, bool isTop) : Character(p, CharacterName::PAWN, isWhite, isTop) {};
     std::vector<Point2D> GetPath();
 };
 
@@ -142,7 +152,7 @@ public:
 class Rook : public Character
 {
 public:
-    Rook(Point2D p, bool isWhite, bool isTop) : Character(p, "rook", isWhite, isTop) {};
+    Rook(Point2D p, bool isWhite, bool isTop) : Character(p, CharacterName::ROOK, isWhite, isTop) {};
 
     std::vector<Point2D> GetPath();
 };
@@ -151,7 +161,7 @@ public:
 class Knight : public Character
 {
 public:
-    Knight(Point2D p, bool isWhite, bool isTop) : Character(p, "knight", isWhite, isTop) {};
+    Knight(Point2D p, bool isWhite, bool isTop) : Character(p, CharacterName::KNIGHT, isWhite, isTop) {};
 
     std::vector<Point2D> GetPath();
 };
@@ -160,10 +170,85 @@ public:
 class Bishop : public Character
 {
 public:
-    Bishop(Point2D p, bool isWhite, bool isTop) : Character(p, "bishop", isWhite, isTop) {};
+    Bishop(Point2D p, bool isWhite, bool isTop) : Character(p, CharacterName::BISHOP, isWhite, isTop) {};
 
     std::vector<Point2D> GetPath();
 };
 
+
+class Queen : public Character
+{
+public:
+    Queen(Point2D p, bool isWhite, bool isTop) : Character(p, CharacterName::QUEEN, isWhite, isTop) {};
+
+    path_t GetPath();
+
+};
+
+
+class King : public Character
+{
+public:
+    King(Point2D p, bool isWhite, bool isTop) : Character(p, CharacterName::KING, isWhite, isTop) {};
+
+    path_t GetPath();
+};
+
+
+
+class Player
+{
+
+    std::vector<std::unique_ptr<Character>> pieces;
+
+public:
+    bool isWhite = false;
+    int score = 0;
+    Player() = default;
+
+    void Reset(bool _isWhite, bool isTop);
+
+    void Update();
+
+    void Render(SDL_Renderer* renderer);
+
+    std::vector<std::unique_ptr<Character>>::iterator GetPieceAt(Point2D pos);
+
+    inline decltype(pieces)& GetPieces()
+    {
+        return pieces;
+    };
+
+    inline int GetColor() const
+    {
+        return isWhite ? 1 : 0;
+    }
+};
+
+
+class CollisionBoard
+{
+    static std::vector<std::vector<CharacterName>> nameBuffer;
+    static std::vector<std::vector<int>> colorBuffer;
+
+public:
+    static const size_t COL_SIZE = 8;
+    static const size_t ROW_SIZE = 8;
+    static const size_t TILE_SIZE = 64;
+
+    static void Reset();
+
+    static void SetPiece(Character& character);
+
+    static inline CharacterName GetNameAt(int x, int y)
+    {
+        return nameBuffer[y][x];
+    }
+
+    static inline int GetColorAt(int x, int y)
+    {
+        return colorBuffer[y][x];
+    }
+};
 
 #endif 

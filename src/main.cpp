@@ -19,6 +19,12 @@ constexpr unsigned int TILESIZE = 64;
 constexpr unsigned int ROW = 8;
 constexpr unsigned int COL = 8;
 
+Player *currentPlayer, *nextPlayer, *whitePlayer, *blackPlayer;
+Player player1, player2;
+
+
+std::vector<std::vector<int>> CollisionBoard::colorBuffer;
+std::vector<std::vector<CharacterName>> CollisionBoard::nameBuffer;
 
 struct {
 
@@ -41,15 +47,14 @@ int main(int argc, char* argv[])
 {
     if (!init()) return -1;
     loadTextures();
-    initCharacters();
-
+    initPlayers();
     mainLoop();
 
     return 0;
 }
 
 
-Character::Character(Point2D p, const std::string& _name, bool _isWhite, bool _isTop)
+Character::Character(Point2D p, CharacterName _name, bool _isWhite, bool _isTop)
 {
     name = _name;
     isWhite = _isWhite;
@@ -63,23 +68,27 @@ Character::Character(Point2D p, const std::string& _name, bool _isWhite, bool _i
 void Character::Draw(SDL_Renderer* renderer)
 {
     SDL_Texture* texture = nullptr;
-    if (name == "pawn")
+    switch (name)
+    {
+    case CharacterName::PAWN:
         texture = textures[isWhite ? "w_pawn" : "b_pawn"];
-
-    if (name == "rook")
+        break;
+    case CharacterName::ROOK:
         texture = textures[isWhite ? "w_rook" : "b_rook"];
-
-    if (name == "knight")
+        break;
+    case CharacterName::KNIGHT:
         texture = textures[isWhite ? "w_knight" : "b_knight"];
-
-    if (name == "bishop")
+        break;
+    case CharacterName::BISHOP:
         texture = textures[isWhite ? "w_bishop" : "b_bishop"];
-
-    if (name == "king")
+        break;
+    case CharacterName::KING:
         texture = textures[isWhite ? "w_king" : "b_king"];
-
-    if (name == "queen")
+        break;
+    case CharacterName::QUEEN:
         texture = textures[isWhite ? "w_queen" : "b_queen"];
+        break;
+    }
 
     SDL_Rect dstRect{ pos.x * TILESIZE, pos.y * TILESIZE, TILESIZE, TILESIZE };
     SDL_RenderCopy(renderer, texture, nullptr, &dstRect);
@@ -106,41 +115,154 @@ bool Character::IsSame(const Character& other)
 }
 
 
+Character::path_t Character::GetRookPath(Character& character)
+{
+    path_t v;
+
+    // up and down
+    auto& pos = character.GetPos();
+
+    Point2D p{ pos.x, pos.y };
+
+    auto loopThroughAxis = [&](const std::string& a = "y") {
+        for (int i = 0; i < 2; i++)
+        {
+            p.x = pos.x;
+            p.y = pos.y;
+
+            bool isHit = false;
+            int dir = i == 0 ? 1 : -1;
+            auto axis = a == "y" ? &p.y : &p.x;
+            auto mx_axis = (a == "y") ? CollisionBoard::ROW_SIZE : CollisionBoard::COL_SIZE;
+            *axis += dir;
+            
+            while (!isHit && *axis >= 0 && *axis < mx_axis)
+            {
+                auto color = CollisionBoard::GetColorAt(p.x, p.y);
+                if (color < 0)
+                    v.push_back(p);
+                else
+                {
+                    if (!(character.GetColor() == color)) v.push_back(p);
+                    isHit = true;
+                }
+                *axis += dir;
+            }
+        }
+
+    };
+
+    loopThroughAxis("y");
+    loopThroughAxis("x");
+
+    return v;
+}
+
+
+Character::path_t Character::GetBishopPath(Character& character)
+{
+    path_t v;
+
+    auto& pos = character.GetPos();
+    Point2D p{ pos.x, pos.y };
+
+    auto loopThroughAxis = [&](const std::string& a = "top") {
+        for (int i = 0; i < 2; i++)
+        {
+            p.x = pos.x;
+            p.y = pos.y;
+
+            int dir = i == 0 ? -1 : 1;
+            bool isHit = false;
+            p.x += dir;
+            p.y += (a == "top")? -1: 1;
+
+            while (!isHit && p.x >= 0 && p.x < CollisionBoard::COL_SIZE && p.y >= 0 && p.y < CollisionBoard::ROW_SIZE)
+            {
+                auto color = CollisionBoard::GetColorAt(p.x, p.y);
+                if (color < 0)
+                    v.push_back(p);
+                else
+                {
+                    if (!(character.GetColor() == color)) v.push_back(p);
+                    isHit = true;
+                }
+                p.x += dir;
+                p.y += (a == "top") ? -1 : 1;
+            }
+
+        }
+    };
+
+    loopThroughAxis("top");
+    //loopThroughAxis("down");
+
+    return v;
+}
+
+bool Character::MoveTo(Point2D dest)
+{
+    auto paths = GetPath();
+    
+    auto destPos = std::find_if(paths.begin(), paths.end(), [&dest](Point2D p) {
+        return (dest.x == p.x && dest.y == p.y);
+        });
+
+    if (destPos != paths.end())
+    {
+        auto color = CollisionBoard::GetColorAt(dest.x, dest.y);
+        
+        //auto piece = nextPlayer->GetPieceAt(dest);
+        //auto& pieces = nextPlayer->GetPieces();
+        //// If the piece is not the same as that in the destination, it should be captured
+        //// By implementation of GetPath(), any piece that is found on the path must be capturable
+        //if (piece != pieces.end())
+        //{
+        //    if ((*piece)->name != CharacterName::KING)
+        //        pieces.erase(piece);
+        //}
+        pos.x = dest.x;
+        pos.y = dest.y;
+
+        return true;
+    }
+
+    return false;
+}
+
+
 
 std::vector<Point2D> Pawn::GetPath()
 {
     isFirstMove = startPos.x == pos.x && startPos.y == pos.y;
     std::vector<Point2D> v;
-    int yOffset = (isTop ? 1 : -1);
-    int yStart = pos.y + yOffset;
+    int yDir = (isTop ? 1 : -1);
+    int yStart = pos.y + yDir;
 
-    // forward
-    Point2D p{ pos.x, yStart };
-    auto piece = getPieceAt(p);
-    if (piece == characters.end())
+    int itCount = isFirstMove ? 2 : 1;
+
+    Point2D p{ pos.x, 0 };
+    for (int i = 0; i < itCount; i++)
     {
-        v.push_back(p);
-        if (isFirstMove)
-        {
-            p.y += yOffset;
-            piece = getPieceAt(p);
-            if (piece == characters.end())
-                v.push_back(p);
-        }
+        p.y = yStart + (i * yDir);
+        if (p.x < 0 || p.x >= CollisionBoard::COL_SIZE || p.y < 0 || p.y >= CollisionBoard::ROW_SIZE)
+            continue;
+
+        auto color = CollisionBoard::GetColorAt(p.x, p.y);
+        if(color < 0)
+            v.push_back(p);
     }
 
     // left
+    p.y = yStart;
     for (int i = 0; i < 2; i++)
     {
         p.x = pos.x + (i == 0 ? 1: -1);
-        piece = getPieceAt(p);
-        if (piece != characters.end())
-        {
-            if (isWhite && !(*piece)->isWhite)
-                v.push_back(p);
-            if (!isWhite && (*piece)->isWhite)
-                v.push_back(p);
-        }
+        if (p.x < 0 || p.x >= CollisionBoard::COL_SIZE || p.y < 0 || p.y >= CollisionBoard::ROW_SIZE)
+            continue;
+        auto color = CollisionBoard::GetColorAt(p.x, p.y);
+        if(color >= 0 && color != GetColor())
+            v.push_back(p);
     }
 
     return v;
@@ -150,57 +272,7 @@ std::vector<Point2D> Pawn::GetPath()
 
 std::vector<Point2D> Rook::GetPath()
 {
-    std::vector<Point2D> v;
-
-    // up and down
-    Point2D p{ pos.x, pos.y };
-
-    for (int i = 0; i < 2; i++)
-    {
-        p.x = pos.x;
-        p.y = pos.y;
-
-        bool isHit = false;
-        int dir = i == 0 ? 1 : -1;
-        p.y += dir;
-        while (!isHit && p.y >= 0 && p.y < ROW)
-        {
-            auto piece = getPieceAt(p);
-            if (piece == characters.end())
-                v.push_back(p);
-            else if (piece != characters.end())
-            {
-                if(!IsSame(**piece)) v.push_back(p);
-                isHit = true;
-            }
-            p.y += dir;
-        }
-    }
-
-    // for x
-    for (int i = 0; i < 2; i++)
-    {
-        p.x = pos.x;
-        p.y = pos.y;
-
-        bool isHit = false;
-        int dir = i == 0 ? 1 : -1;
-        p.x += dir;
-        while (!isHit && p.x >= 0 && p.x < ROW)
-        {
-            auto piece = getPieceAt(p);
-            if (piece == characters.end())
-                v.push_back(p);
-            else if (piece != characters.end())
-            {
-                if (!IsSame(**piece)) v.push_back(p);
-                isHit = true;
-            }
-            p.x += dir;
-        }
-    }
-
-    return v;
+    return Character::GetRookPath(*this);
 }
 
 
@@ -209,32 +281,38 @@ std::vector<Point2D> Knight::GetPath()
     std::vector<Point2D> v;
     Point2D p;
 
-    for (int i = 0; i < 2; i++)
-    {
-        p.y = pos.y + (i == 0 ? 2 : -2);
-
-        for (int j = 0; j < 2; j++)
+    auto throughAxis = [&](const std::string& a = "y") {
+        for (int i = 0; i < 2; i++)
         {
-            p.x = pos.x + (j == 0 ? 1 : -1);
-            auto piece = getPieceAt(p);
-            if (piece == characters.end() || !IsSame(**piece))
-                v.push_back(p);
+
+            auto axis1 = (a == "y") ? &p.y : &p.x;
+            auto axis2 = (a == "y") ? &p.x : &p.y;
+
+            auto& c_axis1 = (a == "y") ? pos.y : pos.x;
+            auto& c_axis2 = (a == "y") ? pos.x : pos.y;
+
+            *axis1 = c_axis1 + (i == 0 ? 2 : -2);
+
+            for (int j = 0; j < 2; j++)
+            {
+                *axis2 = c_axis2 + (j == 0 ? 1 : -1);
+                
+                if (p.x < 0 || p.x >= CollisionBoard::COL_SIZE || p.y < 0 || p.y >= CollisionBoard::ROW_SIZE)
+                    continue;
+
+                auto color = CollisionBoard::GetColorAt(p.x, p.y);
+                if (color < 0)
+                    v.push_back(p);
+                else
+                {
+                    if (!(GetColor() == color)) v.push_back(p);
+                }
+            }
         }
-    }
+    };
 
-
-    for (int i = 0; i < 2; i++)
-    {
-        p.x = pos.x + (i == 0 ? 2 : -2);
-
-        for (int j = 0; j < 2; j++)
-        {
-            p.y = pos.y + (j == 0 ? 1 : -1);
-            auto piece = getPieceAt(p);
-            if (piece == characters.end() || !IsSame(**piece))
-                v.push_back(p);
-        }
-    }
+    throughAxis("y");
+    throughAxis("x");
 
     return v;
 }
@@ -242,90 +320,49 @@ std::vector<Point2D> Knight::GetPath()
 
 std::vector<Point2D> Bishop::GetPath()
 {
-    std::vector<Point2D> v;
+   return GetBishopPath(*this);
+}
 
-    Point2D p{ pos.x, pos.y };
 
-    // for top
-    for (int i = 0; i < 2; i++)
-    {
-        int dir = i == 0 ? -1 : 1;
-        bool isHit = false;
-        p.x = pos.x;
-        p.y = pos.y;
-        p.x += dir;
-        p.y -= 1;
 
-        while (!isHit && p.x >= 0 && p.x < COL && p.y >= 0)
-        {
-            auto piece = getPieceAt(p);
-            if (piece == characters.end())
-                v.push_back(p);
-            else if (piece != characters.end())
-            {
-                if (!IsSame(**piece)) v.push_back(p);
-                isHit = true;
-            }
+Character::path_t Queen::GetPath()
+{
+    path_t v;
 
-            p.x += dir;
-            p.y -= 1;
-        }
-
-    }
-        
-    // for down
-    for (int i = 0; i < 2; i++)
-    {
-        int dir = i == 0 ? -1 : 1;
-        bool isHit = false;
-        p.x = pos.x;
-        p.y = pos.y;
-        p.x += dir;
-        p.y += 1;
-
-        while (!isHit && p.x >= 0 && p.x < COL && p.y >= 0)
-        {
-            auto piece = getPieceAt(p);
-            if (piece == characters.end())
-                v.push_back(p);
-            else if (piece != characters.end())
-            {
-                if (!IsSame(**piece)) v.push_back(p);
-                isHit = true;
-            }
-
-            p.x += dir;
-            p.y += 1;
-        }
-
-    }
-
+    auto path = GetRookPath(*this);
+    v.insert(v.begin(), path.begin(), path.end());
+    path = GetBishopPath(*this);
+    v.insert(v.begin(), path.begin(), path.end());
     return v;
 }
 
 
-class Queen : public Character
+Character::path_t King::GetPath()
 {
-public:
-    Queen(Point2D p, bool isWhite, bool isTop) : Character(p, "queen", isWhite, isTop) {};
-    
-    std::vector<Point2D> GetPath()
+    path_t v, vc;
+
+    vc.push_back({ pos.x, pos.y - 1 });
+    vc.push_back({ pos.x - 1, pos.y - 1 });
+    vc.push_back({ pos.x + 1, pos.y - 1 });
+
+    vc.push_back({ pos.x - 1, pos.y });
+    vc.push_back({ pos.x + 1, pos.y });
+
+    vc.push_back({ pos.x, pos.y + 1 });
+    vc.push_back({ pos.x - 1, pos.y + 1 });
+    vc.push_back({ pos.x + 1, pos.y + 1 });
+
+    for (auto it = vc.begin(); it != vc.end(); it++)
     {
-        return {};
+        auto& p = *it;
+        auto piece = getPieceAt(p);
+        if (piece == characters.end() || !IsSame(**piece))
+            v.push_back(p);
     }
-};
 
 
-class King : public Character
-{
-public:
-    King(Point2D p, bool isWhite, bool isTop) : Character(p, "king", isWhite, isTop) {};
-    
-    std::vector<Point2D> GetPath()
-    {
-        return {};
-    }
-};
+    return v;
+}
 
 
 void processEvent(SDL_Event& evt)
@@ -338,23 +375,31 @@ void processEvent(SDL_Event& evt)
         {
             if (evt.button.button == SDL_BUTTON_LEFT)
             {
-                int x = evt.button.x / TILESIZE;
-                int y = evt.button.y / TILESIZE;
+                int x = evt.button.x / CollisionBoard::TILE_SIZE;
+                int y = evt.button.y / CollisionBoard::TILE_SIZE;
+
+                auto name = CollisionBoard::GetNameAt(x, y);
+                auto color = CollisionBoard::GetColorAt(x, y);
 
                 if (!currentChr)
                 {
-                    auto selected = std::find_if(characters.begin(), characters.end(), [&x, &y](auto& character) {
-                        auto p = character->GetPos();
-                        return p.x == x && p.y == y;
-                        });
-
-                    if (selected != characters.end())
+                    if (currentPlayer->GetColor() == color)
                     {
+                        auto selected = currentPlayer->GetPieceAt({ x, y });
+                        // because of the color buffer, selected must always be a valid piece 
+                        assert(selected != currentPlayer->GetPieces().end());
                         currentChr = &(**selected);
                     }
-                } else {
-                    currentChr->MoveTo({ x, y });
-                    currentChr = nullptr;
+                }
+                else
+                {
+                    if (currentChr->MoveTo({ x, y }))
+                    {
+                        currentChr = nullptr;
+                        currentPlayer = (currentPlayer->GetColor() == 1 ? blackPlayer : whitePlayer);
+                    }
+                    else
+                        currentChr = nullptr;
                 }
             }
         }
@@ -366,10 +411,23 @@ void mainLoop()
 {
     while (!canvas.windowShouldClose)
     {
-        processEvent(canvas.evt);
         update(1 / 60.0f);
+        processEvent(canvas.evt);
         render(canvas.renderer);
     }
+}
+
+
+
+void initPlayers()
+{
+    bool player1IsWhite = true;
+    currentPlayer = player1IsWhite ? &player1 : &player2;
+    whitePlayer = player1IsWhite ? &player1 : &player2;
+    blackPlayer = player1IsWhite ? &player2 : &player1;
+    player1.Reset(player1IsWhite, false);
+    player2.Reset(!player1IsWhite, true);
+
 }
 
 
@@ -422,8 +480,8 @@ void render(SDL_Renderer* renderer)
         }
     }
 
-    for (auto& character : characters)
-        character->Draw(renderer);
+    player1.Render(renderer);
+    player2.Render(renderer);
 
     SDL_RenderPresent(renderer);
 }
@@ -431,54 +489,10 @@ void render(SDL_Renderer* renderer)
 
 void update(float dt)
 {
-}
-
-void initCharacters()
-{
-    characters.clear();
-
-    // i for both top and bottom
-    for (int i = 0; i < 2; i++)
-    {
-        bool isTop = (i == 0);
-        bool isWhite = (i == 0);
-
-        int topOffset = isTop ? 1 : -1;
-        int startY = isTop ? 0 : ROW - 1;
-
-        Point2D pos{ 0, startY };
-
-        // make pawn
-        for (int x = 0; x < COL; x++)
-        {
-            pos.x = x;
-            pos.y = startY + topOffset;
-            characters.push_back(std::make_unique<Pawn>(pos, isWhite, isTop));
-        }
-
-        // setup rook, knight, bishop
-        pos.y = startY;
-
-        for (int i = 0; i < 2; i++)
-        {
-            pos.x = i == 0 ? 0 : COL - 1;
-            characters.push_back(std::make_unique<Rook>(pos, isWhite, isTop));
-
-            pos.x = i == 0 ? 1 : COL - 2;
-            characters.push_back(std::make_unique<Knight>(pos, isWhite, isTop));
-
-            pos.x = i == 0 ? 2 : COL - 3;
-            characters.push_back(std::make_unique<Bishop>(pos, isWhite, isTop));
-        }
-
-        // make queens
-        pos.x = 3;
-        characters.push_back(std::make_unique<Queen>(pos, isWhite, isTop));
-        
-        // make kings
-        pos.x = 4;
-        characters.push_back(std::make_unique<King>(pos, isWhite, isTop));
-    }
+    nextPlayer = currentPlayer == whitePlayer ? blackPlayer : whitePlayer;
+    CollisionBoard::Reset();
+    player1.Update();
+    player2.Update();
 }
 
 
@@ -544,4 +558,98 @@ bool init()
         return false;
     }
     return true;
+}
+
+
+void CollisionBoard::Reset()
+{
+    nameBuffer.clear();
+    colorBuffer.clear();
+
+    for (size_t i = 0; i < ROW_SIZE; i++)
+    {
+        nameBuffer.push_back({ });
+        colorBuffer.push_back({ });
+        for (size_t j = 0; j < COL_SIZE; j++)
+        {
+            nameBuffer[i].push_back(CharacterName::NONE);
+            colorBuffer[i].push_back(-1);
+        }
+    }
+}
+
+
+void CollisionBoard::SetPiece(Character& character)
+{
+    auto& pos = character.GetPos();
+    nameBuffer[pos.y][pos.x] = character.GetName();
+    colorBuffer[pos.y][pos.x] = character.isWhite ? 1 : 0;
+}
+
+
+void Player::Reset(bool _isWhite, bool isTop)
+{
+    pieces.clear();
+
+    isWhite = _isWhite;
+    int topOffset = isTop ? 1 : -1;
+    int startY = isTop ? 0 : CollisionBoard::ROW_SIZE - 1;
+
+    Point2D pos{ 0, startY };
+
+    // make pawn
+    for (int x = 0; x < CollisionBoard::COL_SIZE; x++)
+    {
+        pos.x = x;
+        pos.y = startY + topOffset;
+        pieces.push_back(std::make_unique<Pawn>(pos, isWhite, isTop));
+    }
+
+    // setup rook, knight, bishop
+    pos.y = startY;
+
+    for (int i = 0; i < 2; i++)
+    {
+        pos.x = i == 0 ? 0 : CollisionBoard::COL_SIZE - 1;
+        pieces.push_back(std::make_unique<Rook>(pos, isWhite, isTop));
+
+        pos.x = i == 0 ? 1 : CollisionBoard::COL_SIZE - 2;
+        pieces.push_back(std::make_unique<Knight>(pos, isWhite, isTop));
+
+        pos.x = i == 0 ? 2 : CollisionBoard::COL_SIZE - 3;
+        pieces.push_back(std::make_unique<Bishop>(pos, isWhite, isTop));
+    }
+
+    // make queens
+    pos.x = 3;
+    pieces.push_back(std::make_unique<Queen>(pos, isWhite, isTop));
+
+    // make kings
+    pos.x = 4;
+    pieces.push_back(std::make_unique<King>(pos, isWhite, isTop));
+
+}
+
+
+void Player::Update()
+{
+    for (const auto& piece : pieces)
+        CollisionBoard::SetPiece(*piece);
+}
+
+void Player::Render(SDL_Renderer* renderer)
+{
+    for (const auto& piece : pieces)
+        piece->Draw(renderer);
+}
+
+
+std::vector<std::unique_ptr<Character>>::iterator Player::GetPieceAt(Point2D pos)
+{
+    auto ind = std::find_if(pieces.begin(), pieces.end(), [&pos](auto& piece) {
+        auto& p = piece->GetPos();
+        return (p.x == pos.x && p.y == pos.y);
+        });
+
+    return ind;
 }
