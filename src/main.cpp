@@ -19,9 +19,16 @@ constexpr unsigned int TILESIZE = 64;
 constexpr unsigned int ROW = 8;
 constexpr unsigned int COL = 8;
 
-Player *currentPlayer, *nextPlayer, *whitePlayer, *blackPlayer;
+Player *currentPlayer = nullptr, 
+    *nextPlayer = nullptr, 
+    *whitePlayer = nullptr, 
+    *blackPlayer = nullptr;
+    
 Player player1, player2;
 
+SDL_Rect checkPos;
+
+TTF_Font* font = nullptr;
 
 std::vector<std::vector<int>> CollisionBoard::colorBuffer;
 std::vector<std::vector<CharacterName>> CollisionBoard::nameBuffer;
@@ -54,7 +61,7 @@ int main(int argc, char* argv[])
 }
 
 
-Character::Character(Point2D p, CharacterName _name, bool _isWhite, bool _isTop)
+Character::Character(Point2D p, CharacterName _name, bool _isWhite, bool _isTop, int _point)
 {
     name = _name;
     isWhite = _isWhite;
@@ -63,6 +70,8 @@ Character::Character(Point2D p, CharacterName _name, bool _isWhite, bool _isTop)
     pos = p;
     startPos.x = p.x;
     startPos.y = p.y;
+
+    point = _point;
 }
 
 void Character::Draw(SDL_Renderer* renderer)
@@ -102,16 +111,15 @@ void Character::SetPos(int x, int y)
 }
 
 
+inline int Character::GetPoint() const
+{
+    return point;
+}
+
+
 decltype(Character::pos)& Character::GetPos()
 {
     return pos;
-}
-
-bool Character::IsSame(const Character& other)
-{
-    if (isWhite && other.isWhite) return true;
-    if (!isWhite && !(other.isWhite)) return true;
-    return false;
 }
 
 
@@ -195,10 +203,11 @@ Character::path_t Character::GetBishopPath(Character& character)
     };
 
     loopThroughAxis("top");
-    //loopThroughAxis("down");
+    loopThroughAxis("down");
 
     return v;
 }
+
 
 bool Character::MoveTo(Point2D dest)
 {
@@ -211,16 +220,25 @@ bool Character::MoveTo(Point2D dest)
     if (destPos != paths.end())
     {
         auto color = CollisionBoard::GetColorAt(dest.x, dest.y);
+
+        if (color >= 0)
+        {
+            auto name = CollisionBoard::GetNameAt(dest.x, dest.y);
+            if (name == CharacterName::KING)
+            {
+                std::cout << "Cannot erase a king" << std::endl;
+                return false;
+            }
+
+            auto piece = nextPlayer->GetPieceAt(dest);
+            auto& pieces = nextPlayer->GetPieces();
+            if (piece != pieces.end())
+            {
+                currentPlayer->AddScore((*piece)->GetPoint());
+                pieces.erase(piece);
+            }
+        }
         
-        //auto piece = nextPlayer->GetPieceAt(dest);
-        //auto& pieces = nextPlayer->GetPieces();
-        //// If the piece is not the same as that in the destination, it should be captured
-        //// By implementation of GetPath(), any piece that is found on the path must be capturable
-        //if (piece != pieces.end())
-        //{
-        //    if ((*piece)->name != CharacterName::KING)
-        //        pieces.erase(piece);
-        //}
         pos.x = dest.x;
         pos.y = dest.y;
 
@@ -234,12 +252,11 @@ bool Character::MoveTo(Point2D dest)
 
 std::vector<Point2D> Pawn::GetPath()
 {
-    isFirstMove = startPos.x == pos.x && startPos.y == pos.y;
     std::vector<Point2D> v;
     int yDir = (isTop ? 1 : -1);
     int yStart = pos.y + yDir;
 
-    int itCount = isFirstMove ? 2 : 1;
+    int itCount = IsFirstMove() ? 2 : 1;
 
     Point2D p{ pos.x, 0 };
     for (int i = 0; i < itCount; i++)
@@ -341,27 +358,102 @@ Character::path_t King::GetPath()
 {
     path_t v, vc;
 
-    vc.push_back({ pos.x, pos.y - 1 });
-    vc.push_back({ pos.x - 1, pos.y - 1 });
-    vc.push_back({ pos.x + 1, pos.y - 1 });
+    // this is the normal king's path
+    for (int y = pos.y - 1; y < pos.y + 2; y++)
+        if (y >= 0 && y < CollisionBoard::ROW_SIZE)
+        {
+            for (int x = pos.x - 1; x < pos.x + 2; x++)
+                if (x >= 0 && x < CollisionBoard::COL_SIZE)
+                    if(CollisionBoard::GetColorAt(x, y) != GetColor())
+                        vc.push_back({ x, y });
+        }
 
-    vc.push_back({ pos.x - 1, pos.y });
-    vc.push_back({ pos.x + 1, pos.y });
-
-    vc.push_back({ pos.x, pos.y + 1 });
-    vc.push_back({ pos.x - 1, pos.y + 1 });
-    vc.push_back({ pos.x + 1, pos.y + 1 });
-
-    for (auto it = vc.begin(); it != vc.end(); it++)
+    // add castle path
+    if (!isCastled)
     {
-        auto& p = *it;
-        auto piece = getPieceAt(p);
-        if (piece == characters.end() || !IsSame(**piece))
-            v.push_back(p);
+        auto c_path = GetCastlePath();
+        vc.insert(vc.begin(), c_path.begin(), c_path.end());
     }
 
-
+    v = vc;
     return v;
+}
+
+
+bool King::MoveTo(Point2D dest)
+{
+    
+    return false;
+}
+
+
+bool King::IsInCheck()
+{
+    auto enemy = isWhite ? blackPlayer : whitePlayer;
+
+    for (const auto& piece : enemy->GetPieces())
+    {
+        auto paths = piece->GetPath();
+        for (const auto& path : paths)
+        {
+            if (path.x == pos.x && path.y == pos.y)
+            {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+Character::path_t King::GetCastlePath()
+{
+    path_t path;
+
+    if (!IsFirstMove()) return path;
+
+    int ty = isTop ? 0 : CollisionBoard::ROW_SIZE - 1;
+
+    for (int i = 0; i < 2; i++)
+    {
+        int startX = (i == 0 ? pos.x - 1 : CollisionBoard::COL_SIZE - 2);
+        int endX = i == 0 ? 0 : pos.x;
+        int rx = i == 0 ? 0 : CollisionBoard::COL_SIZE - 1;
+        auto r = CollisionBoard::GetNameAt(rx, ty);
+
+        if (r == CharacterName::ROOK)
+        {
+            auto piece = currentPlayer->GetPieceAt({ rx, ty });
+            if (piece != currentPlayer->GetPieces().end() && (*piece)->IsFirstMove())
+            {
+                bool hasItem = false;
+                for (int i = startX; i > endX; i--)
+                {
+                    if (CollisionBoard::GetColorAt(i, ty) >= 0)
+                    {
+                        hasItem = true;
+                        break;
+                    }
+
+                    //TODO: use "for i" so the break keyword can be used early
+                    for (auto& piece : nextPlayer->GetPieces())
+                    {
+                        auto&& p = piece->GetPath();
+                        auto ind = std::find_if(p.begin(), p.end(), [&i, &ty](auto& tp){
+                            return tp.x == i && tp.y == ty;
+                        });
+                        if (ind != p.end())
+                            hasItem = true;
+                    }
+                }
+
+                if (!hasItem)
+                    path.push_back({ pos.x + (i == 0 ? -2: 2), ty});
+            }
+        }
+    }
+
+    return path;
 }
 
 
@@ -445,7 +537,12 @@ std::vector<std::unique_ptr<Character>>::iterator getPieceAt(Point2D pos)
 void render(SDL_Renderer* renderer)
 {
     SDL_RenderClear(renderer);
-    SDL_SetRenderDrawColor(renderer, 255, 0, 0, 255);
+    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+
+    int W, H;
+    SDL_GetWindowSize(canvas.window, &W, &H);
+    SDL_Rect rect{ 0, 0, W, H };
+    SDL_RenderCopy(renderer, textures["bg_dark_brown"], nullptr, &rect);
 
     for (auto i = 0; i < ROW; i++)
     {
@@ -482,6 +579,16 @@ void render(SDL_Renderer* renderer)
 
     player1.Render(renderer);
     player2.Render(renderer);
+
+    rect.x = 0;
+    rect.y = 0;
+    rect.w = CollisionBoard::TILE_SIZE * CollisionBoard::COL_SIZE;
+    rect.h = CollisionBoard::TILE_SIZE * CollisionBoard::ROW_SIZE;
+    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+    SDL_RenderDrawRect(renderer, &rect);
+
+    auto text = solidText(renderer, "Hello world", { 550, 20 }, { 255, 255, 255 });
+    SDL_DestroyTexture(text);
 
     SDL_RenderPresent(renderer);
 }
@@ -532,6 +639,20 @@ void loadTextures()
 }
 
 
+
+SDL_Texture* solidText(SDL_Renderer* renderer, const std::string& text, Point2D pos, SDL_Color color)
+{
+    const char* _text = text.c_str();
+    SDL_Surface* surface = TTF_RenderText_Solid(font, _text, color);
+    SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
+
+    SDL_Rect dest = { pos.x, pos.y, surface->w, surface->h };
+    SDL_FreeSurface(surface);
+
+    return texture;
+}
+
+
 bool init()
 {
     if (SDL_Init(SDL_INIT_VIDEO) != 0)
@@ -543,8 +664,9 @@ bool init()
     if (!(IMG_Init(IMG_INIT_PNG) & IMG_INIT_PNG))
         SDL_Log("SDL_image init failed: %s", IMG_GetError());
 
+    TTF_Init();
 
-    canvas.window = SDL_CreateWindow("Chess", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 512, 512, 0);
+    canvas.window = SDL_CreateWindow("Chess", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 640, 512, 0);
     if (!canvas.window)
     {
         std::cerr << "Unable to create SDL2 Window: " << SDL_GetError() << std::endl;
@@ -557,12 +679,19 @@ bool init()
         std::cerr << "Unable to create SDL2 Renderer: " << SDL_GetError() << std::endl;
         return false;
     }
+
+    font = TTF_OpenFont("../../../assets/SpecialGothic-Regular.ttf", 24);
+    if (!font) {
+        std::cerr << "Unable to load font" << std::endl;
+    }
+
     return true;
 }
 
 
 void CollisionBoard::Reset()
 {
+    // clear and update collision board
     nameBuffer.clear();
     colorBuffer.clear();
 
@@ -590,6 +719,7 @@ void CollisionBoard::SetPiece(Character& character)
 void Player::Reset(bool _isWhite, bool isTop)
 {
     pieces.clear();
+    score = 0;
 
     isWhite = _isWhite;
     int topOffset = isTop ? 1 : -1;
@@ -652,4 +782,21 @@ std::vector<std::unique_ptr<Character>>::iterator Player::GetPieceAt(Point2D pos
         });
 
     return ind;
+}
+
+//std::unique_ptr<Character>& Player::GetKing() const
+//{
+//    for (auto& piece : pieces)
+//    {
+//        if (piece->GetName() == CharacterName::KING)
+//        {
+//            return **piece;
+//        }
+//    };
+//}
+
+
+inline void Logger::NextTurn()
+{
+    
 }

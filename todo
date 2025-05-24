@@ -1,3 +1,12 @@
-1. Take actions
-2. Randomize player as white or black
-3. White edge pawns sometimes give errors on selectedss
+1. make king's basic vision
+2. add text to it
+2. set score and history
+
+
+CASTLING RULES
+- The king does not pass through a square under attack.
+- The king does not end up in check.
+
+
+PROMOTION
+- If a pawn reaches the last rank, it can become a queen, rook, bishop, or knight.

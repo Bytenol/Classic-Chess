@@ -8,7 +8,8 @@ FILE(GLOB SRC_FILES "src/*.cpp")
 
 find_package(SDL2 CONFIG REQUIRED)
 find_package(SDL2_image CONFIG REQUIRED)
+find_package(SDL2_ttf CONFIG REQUIRED)
 
 add_executable(chess ${SRC_FILES})
 
-target_link_libraries(chess PRIVATE SDL2::SDL2 SDL2::SDL2main SDL2_image::SDL2_image)
+target_link_libraries(chess PRIVATE SDL2::SDL2 SDL2::SDL2main SDL2_image::SDL2_image SDL2_ttf::SDL2_ttf)

@@ -27,6 +27,7 @@
 #define SDL_MAIN_HANDLED
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_image.h>
+#include <SDL2/SDL_ttf.h>
 
 
 // forward classes declaration
@@ -47,9 +48,10 @@ enum class CharacterName
 };
 
 extern Character* currentChr;
-extern std::vector<std::unique_ptr<Character>> characters;
 extern std::map<std::string, SDL_Texture*> textures;
 extern Player player1, player2;
+extern Player *currentPlayer, *nextPlayer, *whitePlayer, *blackPlayer;
+extern TTF_Font* font;
 
 
 std::vector<std::unique_ptr<Character>>::iterator getPieceAt(Point2D pos);
@@ -68,6 +70,8 @@ void loadTexture(const std::string& name, const std::string& path);
 
 void loadTextures();
 
+SDL_Texture* solidText(SDL_Renderer* renderer, const std::string& text, Point2D pos, SDL_Color color);
+
 bool init();
 
 
@@ -80,6 +84,8 @@ struct Point2D
 class Character
 {
 
+    friend class King;
+
 protected:
     Point2D pos{ 0, 0 };
     Point2D oldPos{ 0, 0 };
@@ -87,23 +93,24 @@ protected:
     bool isSelected = false;
     CharacterName name;
 
-    bool isFirstMove = true;
     Point2D startPos;
+
+    int point;
 
     using path_t = std::vector<Point2D>;
 
 public:
     bool isWhite = false;
 
-    Character(Point2D p, CharacterName _name, bool _isWhite, bool _isTop);
+    Character(Point2D p, CharacterName _name, bool _isWhite, bool _isTop, int _point);
 
     void Draw(SDL_Renderer* renderer);
 
     void SetPos(int x, int y);
 
-    decltype(pos)& GetPos();
+    inline int GetPoint() const;
 
-    bool IsSame(const Character& other);
+    decltype(pos)& GetPos();
 
     static path_t GetRookPath(Character& character);
 
@@ -137,6 +144,12 @@ public:
         return isWhite ? 1 : 0;
     }
 
+protected:
+    inline bool IsFirstMove() const
+    {
+        return startPos.x == pos.x && startPos.y == pos.y;
+    };
+
 };
 
 
@@ -144,7 +157,7 @@ class Pawn: public Character
 {
 
 public:
-    Pawn(Point2D p, bool isWhite, bool isTop) : Character(p, CharacterName::PAWN, isWhite, isTop) {};
+    Pawn(Point2D p, bool isWhite, bool isTop) : Character(p, CharacterName::PAWN, isWhite, isTop, 1) {};
     std::vector<Point2D> GetPath();
 };
 
@@ -152,7 +165,7 @@ public:
 class Rook : public Character
 {
 public:
-    Rook(Point2D p, bool isWhite, bool isTop) : Character(p, CharacterName::ROOK, isWhite, isTop) {};
+    Rook(Point2D p, bool isWhite, bool isTop) : Character(p, CharacterName::ROOK, isWhite, isTop, 5) {};
 
     std::vector<Point2D> GetPath();
 };
@@ -161,7 +174,7 @@ public:
 class Knight : public Character
 {
 public:
-    Knight(Point2D p, bool isWhite, bool isTop) : Character(p, CharacterName::KNIGHT, isWhite, isTop) {};
+    Knight(Point2D p, bool isWhite, bool isTop) : Character(p, CharacterName::KNIGHT, isWhite, isTop, 3) {};
 
     std::vector<Point2D> GetPath();
 };
@@ -170,7 +183,7 @@ public:
 class Bishop : public Character
 {
 public:
-    Bishop(Point2D p, bool isWhite, bool isTop) : Character(p, CharacterName::BISHOP, isWhite, isTop) {};
+    Bishop(Point2D p, bool isWhite, bool isTop) : Character(p, CharacterName::BISHOP, isWhite, isTop, 3) {};
 
     std::vector<Point2D> GetPath();
 };
@@ -179,7 +192,7 @@ public:
 class Queen : public Character
 {
 public:
-    Queen(Point2D p, bool isWhite, bool isTop) : Character(p, CharacterName::QUEEN, isWhite, isTop) {};
+    Queen(Point2D p, bool isWhite, bool isTop) : Character(p, CharacterName::QUEEN, isWhite, isTop, 9) {};
 
     path_t GetPath();
 
@@ -189,9 +202,17 @@ public:
 class King : public Character
 {
 public:
-    King(Point2D p, bool isWhite, bool isTop) : Character(p, CharacterName::KING, isWhite, isTop) {};
+    King(Point2D p, bool isWhite, bool isTop) : Character(p, CharacterName::KING, isWhite, isTop, INFINITY) {};
 
     path_t GetPath();
+
+    bool MoveTo(Point2D dest);
+
+    bool IsInCheck();
+
+private:
+    bool isCastled = false;
+    path_t GetCastlePath();
 };
 
 
@@ -200,10 +221,11 @@ class Player
 {
 
     std::vector<std::unique_ptr<Character>> pieces;
+    int score = 0;
 
 public:
     bool isWhite = false;
-    int score = 0;
+    
     Player() = default;
 
     void Reset(bool _isWhite, bool isTop);
@@ -214,6 +236,8 @@ public:
 
     std::vector<std::unique_ptr<Character>>::iterator GetPieceAt(Point2D pos);
 
+    //std::unique_ptr<Character>& GetKing() const;
+
     inline decltype(pieces)& GetPieces()
     {
         return pieces;
@@ -222,7 +246,18 @@ public:
     inline int GetColor() const
     {
         return isWhite ? 1 : 0;
-    }
+    };
+
+    inline void AddScore(int s)
+    {
+        score += s;
+    };
+
+    inline std::string GetName()
+    {
+        return isWhite ? "White" : "Black";
+    };
+
 };
 
 
@@ -249,6 +284,13 @@ public:
     {
         return colorBuffer[y][x];
     }
+};
+
+
+class Logger
+{
+public:
+    static inline void NextTurn();
 };
 
 #endif 
